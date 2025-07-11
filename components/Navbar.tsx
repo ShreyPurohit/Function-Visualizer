@@ -2,16 +2,29 @@ import Link from "next/link";
 
 const Navbar = () => {
     return (
-        <nav className="px-5 py-3 shadow">
-            <div className="flex items-center justify-between">
-                <Link href={'/'}>Home</Link>
-                <div className="flex items-center gap-5 text-black">
-                    <Link href={'/'}>How it works</Link>
-                    <Link href={'/'}>Visualize</Link>
+        <header>
+            <nav className="bg-white text-gray-900 px-4 sm:px-6 py-4 shadow-md" aria-label="Main navigation">
+                <div className="max-w-7xl mx-auto flex items-center justify-between">
+                    <Link href="/" className="text-xl font-bold hover:text-blue-600 transition-colors">
+                        VisualizeIt
+                    </Link>
+
+                    <ul className="flex items-center gap-6 text-sm font-medium">
+                        <li>
+                            <Link href="/" className="hover:text-blue-500 transition-colors">
+                                How It Works
+                            </Link>
+                        </li>
+                        <li>
+                            <Link href="/visualize" className="hover:text-blue-500 transition-colors">
+                                Visualize
+                            </Link>
+                        </li>
+                    </ul>
                 </div>
-            </div>
-        </nav>
-    )
-}
+            </nav>
+        </header>
+    );
+};
 
 export default Navbar;

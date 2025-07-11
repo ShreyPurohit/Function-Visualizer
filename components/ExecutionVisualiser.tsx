@@ -19,7 +19,7 @@ export const ExecutionVisualizer = ({ steps, currentStep }: Props) => {
                         initial={false}
                         animate={{
                             backgroundColor:
-                                index === currentStep ? 'rgba(59,130,246,0.1)' : 'transparent',
+                                index === currentStep ? 'rgba(59,130,246,0.1)' : 'rgba(0,0,0,0)',
                             scale: index === currentStep ? 1.02 : 1,
                         }}
                         transition={{ duration: 0.25 }}

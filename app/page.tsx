@@ -3,19 +3,19 @@ import Navbar from "../components/Navbar";
 
 export default function Home() {
   return (
-    <main className="bg-blue-200 h-screen">
-      <header>
-        <Navbar />
-        <div className="w-full bg-blue-500 text-text flex justify-center items-center flex-col p-6">
-          <h1 className="uppercase bg-cyan-400 px-6 py-2 font-extrabold text-gray-800 text-5xl max-w-5xl text-center my-5 rounded-md">
-            Visualize Functions <br />
-            Understand Code
-          </h1>
-          <p className="font-medium text-2xl text-white text-center break-words max-w-3xl">
-            Simplify Anonymous Functions By Visualizing
-          </p>
-        </div>
-      </header>
+    <main className="min-h-screen bg-blue-50 text-gray-800">
+      <Navbar />
+
+      <section className="w-full bg-blue-600 flex flex-col items-center justify-center px-4 py-16 text-white text-center">
+        <h1 className="uppercase bg-cyan-500 px-6 py-3 font-extrabold text-3xl sm:text-4xl md:text-5xl rounded-md shadow-md max-w-4xl mb-6">
+          Visualize Functions <br />
+          Understand Code
+        </h1>
+        <p className="text-lg md:text-xl font-medium max-w-2xl">
+          Simplify anonymous functions by visualizing them interactively
+        </p>
+      </section>
+
       <Body />
     </main>
   );

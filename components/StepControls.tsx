@@ -1,5 +1,12 @@
 'use client';
 
+import {
+    FastForward,
+    Pause,
+    Play,
+    Rewind,
+    RotateCcw,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 type Props = {
@@ -12,8 +19,11 @@ const StepControls = ({ currentStep, totalSteps, onStepChange }: Props) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+    const isFirstStep = currentStep === 0;
+    const isLastStep = currentStep === totalSteps - 1;
+
     const next = () => {
-        if (currentStep < totalSteps - 1) {
+        if (!isLastStep) {
             onStepChange(currentStep + 1);
         } else {
             setIsPlaying(false); // Stop auto-play at the end
@@ -21,12 +31,17 @@ const StepControls = ({ currentStep, totalSteps, onStepChange }: Props) => {
     };
 
     const prev = () => {
-        if (currentStep > 0) {
+        if (!isFirstStep) {
             onStepChange(currentStep - 1);
         }
     };
 
-    const togglePlay = () => setIsPlaying(prev => !prev);
+    const reset = () => {
+        setIsPlaying(false);
+        onStepChange(0);
+    };
+
+    const togglePlay = () => setIsPlaying((prev) => !prev);
 
     useEffect(() => {
         if (isPlaying) {
@@ -42,43 +57,67 @@ const StepControls = ({ currentStep, totalSteps, onStepChange }: Props) => {
         };
     }, [isPlaying, onStepChange, totalSteps]);
 
-    const reset = () => {
-        setIsPlaying(false);
-        onStepChange(0);
-    };
-
     return (
-        <div className="flex gap-4 items-center justify-center mt-4">
+        <section
+            className="flex flex-wrap items-center justify-center gap-4 mt-4"
+            aria-label="Step Controls"
+        >
+            {/* Prev */}
             <button
                 onClick={prev}
-                disabled={currentStep === 0}
-                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                disabled={isFirstStep}
+                className="flex items-center gap-1 px-3 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 transition"
+                aria-label="Previous Step"
             >
-                ⏮ Prev
+                <Rewind className="w-4 h-4" />
+                Prev
             </button>
+
+            {/* Play / Pause */}
             <button
                 onClick={togglePlay}
-                className="px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
+                className="flex items-center gap-1 px-3 py-2 rounded bg-blue-500 text-white hover:bg-blue-600 transition"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
             >
-                {isPlaying ? '⏸ Pause' : '▶ Play'}
+                {isPlaying ? (
+                    <>
+                        <Pause className="w-4 h-4" />
+                        Pause
+                    </>
+                ) : (
+                    <>
+                        <Play className="w-4 h-4" />
+                        Play
+                    </>
+                )}
             </button>
+
+            {/* Next */}
             <button
                 onClick={next}
-                disabled={currentStep === totalSteps - 1}
-                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                disabled={isLastStep}
+                className="flex items-center gap-1 px-3 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 transition"
+                aria-label="Next Step"
             >
-                ⏭ Next
+                <FastForward className="w-4 h-4" />
+                Next
             </button>
+
+            {/* Reset */}
             <button
                 onClick={reset}
-                className="px-3 py-1 rounded bg-red-100 text-red-600 hover:bg-red-200"
+                className="flex items-center gap-1 px-3 py-2 rounded bg-red-100 text-red-600 hover:bg-red-200 transition"
+                aria-label="Reset Steps"
             >
-                🔄 Reset
+                <RotateCcw className="w-4 h-4" />
+                Reset
             </button>
-            <span className="text-sm text-gray-500">
+
+            {/* Step Count */}
+            <span className="text-sm text-gray-600 font-medium ml-2">
                 Step {currentStep + 1} of {totalSteps}
             </span>
-        </div>
+        </section>
     );
 };
 
