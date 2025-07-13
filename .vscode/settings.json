@@ -1,6 +1,12 @@
 {
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-        "source.organizeImports": "always"
-    }
+  "eslint.options": {
+    "overrideConfigFile": "eslint.config.mjs"
+  },
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "always",
+    "source.fixAll.eslint": "always"
+  },
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true
 }

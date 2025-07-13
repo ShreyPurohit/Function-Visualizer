@@ -1,12 +1,11 @@
-import MonacoEditor from "./MonacoEditor";
+import MonacoEditor from './MonacoEditors'
 
-const Body = () => {
-    return (
-        <section className="px-6 py-10">
-            <p className="font-semibold">Paste Your Function Here:</p>
-            <MonacoEditor />
-        </section>
-    );
+const HomeView = () => {
+  return (
+    <section className='px-6'>
+      <MonacoEditor />
+    </section>
+  )
 }
 
-export default Body;
+export default HomeView
