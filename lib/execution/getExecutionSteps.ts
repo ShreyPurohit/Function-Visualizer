@@ -1,10 +1,9 @@
-import { ExecutionContext, ExecutionError, ExecutionMeta, ExecutionStep } from '@/types/execution'
+import { ExecutionError, ExecutionStep } from '@/types/execution'
 import { parse, ParserOptions } from '@babel/parser'
-import traverse, { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'
-import { applyExpr, evalExpr } from './helpers/evalExpr'
-import { createStepPusher, StepConfig } from './helpers/step'
-import { simulateFor, simulateIf, simulateWhile } from './simulators/controlFlow'
+import { evalStmt } from './eval/evalStmt'
+import { EnhancedExecutionContext, resetControlFlow } from './eval/evalUtils'
+import { createStepPusher, StepConfig } from './step'
 
 /**
  * Configuration for execution step generation
@@ -61,9 +60,13 @@ export function getExecutionSteps(
     // Parse the code with enhanced error handling
     const ast = parseCodeSafely(trimmedCode, finalConfig)
 
-    // Initialize execution context with safe environment if enabled
+    // Initialize execution context with enhanced control flow support
     const steps: ExecutionStep[] = []
-    const variables: ExecutionContext = {}
+    const variables: EnhancedExecutionContext = {
+      __controlFlow: { type: 'normal' },
+      __loopDepth: 0,
+      __functionDepth: 0,
+    }
 
     if (finalConfig.safeMode) {
       setupSafeExecutionEnvironment(variables)
@@ -71,7 +74,7 @@ export function getExecutionSteps(
 
     const pushStep = createStepPusher(trimmedCode, steps, variables, finalConfig)
 
-    // Traverse and execute
+    // Execute AST with enhanced control flow
     executeAST(ast, variables, pushStep)
 
     // Validate results if enabled
@@ -130,146 +133,55 @@ function parseCodeSafely(code: string, config: ExecutionConfig): t.File {
 }
 
 /**
- * Execute the AST with proper error handling and context management
+ * Execute the AST with enhanced control flow support
  */
 function executeAST(
   ast: t.File,
-  variables: ExecutionContext,
+  variables: EnhancedExecutionContext,
   pushStep: ReturnType<typeof createStepPusher>,
 ): void {
-  traverse(ast, {
-    enter(path: NodePath) {
+  // Reset control flow state
+  resetControlFlow(variables)
+
+  // Execute program body statements
+  if (ast.program && ast.program.body) {
+    for (const statement of ast.program.body) {
       try {
-        executeNode(path, variables, pushStep)
+        const result = evalStmt(statement, variables, pushStep)
+
+        // Handle top-level control flow (like return statements)
+        if (result.type === 'return') {
+          pushStep(statement.loc?.start.line, {
+            output: 'Program terminated by return statement',
+          })
+          break
+        }
+
+        // Break and continue at top level are errors, but we'll handle gracefully
+        if (result.type === 'break' || result.type === 'continue') {
+          pushStep(statement.loc?.start.line, {
+            output: `Error: ${result.type} statement outside of loop`,
+          })
+        }
       } catch (error) {
-        const line = path.node.loc?.start.line
+        const line = statement.loc?.start.line
         const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
-        console.warn(`Error executing node at line ${line}:`, errorMessage)
+        console.warn(`Error executing statement at line ${line}:`, errorMessage)
 
         pushStep(line, {
           output: `Error: ${errorMessage}`,
         })
 
-        path.skip()
+        // Continue with next statement instead of stopping
+        continue
       }
-    },
-  })
-}
-
-/**
- * Execute individual AST nodes
- */
-function executeNode(
-  path: NodePath,
-  variables: ExecutionContext,
-  pushStep: ReturnType<typeof createStepPusher>,
-): void {
-  const node = path.node
-
-  if (shouldSkipNode(node, path)) {
-    return
-  }
-
-  if (t.isVariableDeclaration(node)) {
-    handleVariableDeclaration(node, variables, pushStep)
-  } else if (t.isExpressionStatement(node)) {
-    handleExpressionStatement(node, variables, pushStep)
-  } else if (t.isForStatement(node)) {
-    simulateFor(node, variables, pushStep)
-    path.skip()
-  } else if (t.isWhileStatement(node)) {
-    simulateWhile(node, variables, pushStep)
-    path.skip()
-  } else if (t.isIfStatement(node)) {
-    simulateIf(node, variables, pushStep)
-    path.skip()
-  } else if (t.isFunctionDeclaration(node)) {
-    handleFunctionDeclaration(node, variables, pushStep)
-  }
-}
-
-/**
- * Determine if a node should be skipped during execution
- */
-function shouldSkipNode(node: t.Node, path: NodePath): boolean {
-  const parent = path.parent
-
-  if (
-    t.isForStatement(parent) ||
-    t.isWhileStatement(parent) ||
-    t.isIfStatement(parent) ||
-    (t.isBlockStatement(parent) &&
-      (t.isForStatement(path.parentPath?.parent) ||
-        t.isWhileStatement(path.parentPath?.parent) ||
-        t.isIfStatement(path.parentPath?.parent)))
-  ) {
-    return true
-  }
-
-  if (
-    t.isTSTypeAnnotation(node) ||
-    t.isTSTypeReference(node) ||
-    t.isTSInterfaceDeclaration(node) ||
-    t.isTSTypeAliasDeclaration(node)
-  ) {
-    return true
-  }
-
-  return false
-}
-
-/**
- * Handle variable declarations
- */
-function handleVariableDeclaration(
-  node: t.VariableDeclaration,
-  variables: ExecutionContext,
-  pushStep: ReturnType<typeof createStepPusher>,
-): void {
-  node.declarations.forEach((declarator) => {
-    if (t.isIdentifier(declarator.id)) {
-      const value = evalExpr(declarator.init, variables)
-      variables[declarator.id.name] = value
     }
-  })
-
-  pushStep(node.loc?.start.line)
-}
-
-/**
- * Handle expression statements
- */
-function handleExpressionStatement(
-  node: t.ExpressionStatement,
-  variables: ExecutionContext,
-  pushStep: ReturnType<typeof createStepPusher>,
-): void {
-  const line = node.loc?.start.line
-  const meta: ExecutionMeta = {}
-
-  applyExpr(node.expression, variables, meta)
-  pushStep(line, meta)
-}
-
-/**
- * Handle function declarations
- */
-function handleFunctionDeclaration(
-  node: t.FunctionDeclaration,
-  variables: ExecutionContext,
-  pushStep: ReturnType<typeof createStepPusher>,
-): void {
-  if (node.id && t.isIdentifier(node.id)) {
-    variables[node.id.name] = `[Function: ${node.id.name}]`
-    pushStep(node.loc?.start.line, {
-      output: `Function '${node.id.name}' declared`,
-    })
   }
 }
 
 /**
- * Utility function to validate execution steps - NOW USED!
+ * Utility function to validate execution steps
  */
 function validateExecutionSteps(steps: ExecutionStep[]): boolean {
   if (!Array.isArray(steps)) {
@@ -297,9 +209,9 @@ function validateExecutionSteps(steps: ExecutionStep[]): boolean {
 }
 
 /**
- * Setup safe execution environment - NOW USED!
+ * Setup safe execution environment
  */
-function setupSafeExecutionEnvironment(variables: ExecutionContext): void {
+function setupSafeExecutionEnvironment(variables: EnhancedExecutionContext): void {
   // Add safe built-in objects and methods
   variables.__SAFE_MODE__ = true
   variables.__MAX_EXECUTION_TIME__ = 5000
