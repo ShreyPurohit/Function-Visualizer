@@ -1,6 +1,6 @@
 'use client'
 
-import { valueToString } from '@/lib/execution/helpers/evalExpr'
+import { valueToString } from '@/lib/execution/eval/evalExpr'
 import { ExecutionStep, VariableValue } from '@/types/execution'
 import { TerminalSquare } from 'lucide-react'
 import { useMemo } from 'react'
