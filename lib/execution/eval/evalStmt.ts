@@ -1,13 +1,16 @@
 import { ExecutionMeta } from '@/types/execution'
 import * as t from '@babel/types'
 import { handleBreakStatement, handleContinueStatement, handleReturnStatement } from './evalControl'
-import { applyExpr, evalExpr } from './evalExpr'
+import { applyExpr, evalExpr, executeFunctionCall } from './evalExpr'
 import { simulateDoWhile, simulateFor, simulateWhile } from './evalLoops'
 import {
   ControlFlowResult,
   EnhancedExecutionContext,
+  FunctionDefinition,
   PushStepFn,
+  getFunction,
   getNodeLine,
+  registerFunction,
   shouldInterruptExecution,
 } from './evalUtils'
 
@@ -67,6 +70,10 @@ export function evalStmt(
       return simulateDoWhile(stmt, context, pushStep)
     }
 
+    if (t.isFunctionDeclaration(stmt)) {
+      return handleFunctionDeclaration(stmt, context, pushStep)
+    }
+
     // Handle empty statements (semicolons)
     if (t.isEmptyStatement(stmt)) {
       // Empty statements don't need to be processed or logged
@@ -95,6 +102,46 @@ export function evalStmt(
 }
 
 /**
+ * Handle function declarations
+ */
+function handleFunctionDeclaration(
+  stmt: t.FunctionDeclaration,
+  context: EnhancedExecutionContext,
+  pushStep: PushStepFn,
+): ControlFlowResult {
+  const line = getNodeLine(stmt)
+
+  if (!stmt.id) {
+    pushStep(line, {
+      output: 'Error: Function declaration must have a name',
+    })
+    return { type: 'normal' }
+  }
+
+  const functionName = stmt.id.name
+  const parameters = stmt.params
+    .filter((param): param is t.Identifier => t.isIdentifier(param))
+    .map(param => param.name)
+
+  // Create function definition
+  const functionDef: FunctionDefinition = {
+    name: functionName,
+    params: parameters,
+    body: stmt.body,
+    node: stmt,
+  }
+
+  // Register the function
+  registerFunction(context, functionDef)
+
+  pushStep(line, {
+    output: `Function '${functionName}' declared with parameters: [${parameters.join(', ')}]`,
+  })
+
+  return { type: 'normal' }
+}
+
+/**
  * Handle expression statements
  */
 function handleExpressionStatement(
@@ -106,7 +153,21 @@ function handleExpressionStatement(
   const line = getNodeLine(stmt)
   const stepMeta = { ...meta }
 
-  applyExpr(stmt.expression, context, stepMeta)
+  // Special handling for function calls in expression statements
+  if (t.isCallExpression(stmt.expression) && t.isIdentifier(stmt.expression.callee)) {
+    const functionName = stmt.expression.callee.name
+
+    // Check if it's a user-defined function
+    if (getFunction(context, functionName)) {
+      executeFunctionCall(stmt.expression, context, pushStep)
+    } else {
+      // Handle built-in functions (like console.log)
+      applyExpr(stmt.expression, context, stepMeta)
+    }
+  } else {
+    applyExpr(stmt.expression, context, stepMeta)
+  }
+
   pushStep(line, stepMeta)
 
   return { type: 'normal' }

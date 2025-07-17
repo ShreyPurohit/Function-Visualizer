@@ -5,6 +5,7 @@ import {
     EnhancedExecutionContext,
     PushStepFn,
     getNodeLine,
+    isInsideFunction,
     isInsideLoop,
     setControlFlow,
     shouldInterruptExecution,
@@ -76,6 +77,13 @@ export function handleReturnStatement(
 ): ControlFlowResult {
     const line = getNodeLine(node)
     const returnValue = node.argument ? evalExpr(node.argument, context) : undefined
+
+    // Validate that return is inside a function
+    if (!isInsideFunction(context)) {
+        const errorMsg = 'SyntaxError: Illegal return statement'
+        pushStep(line, { output: errorMsg })
+        throw new Error(errorMsg)
+    }
 
     const result: ControlFlowResult = { type: 'return', value: returnValue }
     setControlFlow(context, result)
