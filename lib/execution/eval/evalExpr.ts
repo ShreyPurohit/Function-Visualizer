@@ -1,5 +1,19 @@
 import { ExecutionContext, ExecutionMeta, VariableValue } from '@/types/execution'
 import * as t from '@babel/types'
+import { executeStatements } from './evalStmt'
+import {
+  CallStackFrame,
+  EnhancedExecutionContext,
+  PushStepFn,
+  createFunctionScope,
+  decrementFunctionDepth,
+  getCallStackDepth,
+  getFunction,
+  getNodeLine,
+  incrementFunctionDepth,
+  popCallStackFrame,
+  pushCallStackFrame
+} from './evalUtils'
 
 // Constants
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
@@ -194,8 +208,173 @@ function handleCallExpression(
     if (currentStepMeta) {
       currentStepMeta.output = output.length === 1 ? output[0] : output
     }
+    return
   }
-  // TODO: Handle other function calls if needed
+
+  // Handle user-defined function calls
+  if (t.isIdentifier(expr.callee)) {
+    const functionName = expr.callee.name
+    const enhancedContext = context as EnhancedExecutionContext
+    const functionDef = getFunction(enhancedContext, functionName)
+
+    if (functionDef) {
+      // This is a function call - we need a pushStep function to handle it properly
+      // For now, we'll store the call info in the meta
+      if (currentStepMeta) {
+        currentStepMeta.output = `Function call: ${functionName}(...)`
+      }
+    }
+  }
+}
+
+/**
+ * Execute a function call with proper scope management
+ */
+export function executeFunctionCall(
+  expr: t.CallExpression,
+  context: EnhancedExecutionContext,
+  pushStep: PushStepFn,
+): VariableValue {
+  if (!t.isIdentifier(expr.callee)) {
+    pushStep(getNodeLine(expr), {
+      output: 'Error: Only simple function calls are supported',
+    })
+    return undefined
+  }
+
+  const functionName = expr.callee.name
+  const functionDef = getFunction(context, functionName)
+
+  if (!functionDef) {
+    pushStep(getNodeLine(expr), {
+      output: `Error: Function '${functionName}' is not defined`,
+    })
+    return undefined
+  }
+
+  // Check for maximum call stack depth to prevent infinite recursion
+  const maxCallStackDepth = 50
+  if (getCallStackDepth(context) >= maxCallStackDepth) {
+    pushStep(getNodeLine(expr), {
+      output: `Error: Maximum call stack size exceeded`,
+    })
+    return undefined
+  }
+
+  // Evaluate arguments
+  const args = expr.arguments
+    .filter((arg): arg is t.Expression => t.isExpression(arg))
+    .map(arg => evalExpr(arg, context))
+
+  // Check parameter count
+  if (args.length !== functionDef.params.length) {
+    pushStep(getNodeLine(expr), {
+      output: `Warning: Function '${functionName}' expects ${functionDef.params.length} arguments, got ${args.length}`,
+    })
+  }
+
+  // Create parameter mapping
+  const parameters: Record<string, unknown> = {}
+  functionDef.params.forEach((param, index) => {
+    parameters[param] = index < args.length ? args[index] : undefined
+  })
+
+  // Create call stack frame
+  const callFrame: CallStackFrame = {
+    functionName,
+    parameters,
+    localVariables: {},
+    line: getNodeLine(expr),
+  }
+
+  pushStep(getNodeLine(expr), {
+    output: `Calling function '${functionName}' with arguments: [${args.map(arg =>
+      typeof arg === 'string' ? `"${arg}"` : String(arg)
+    ).join(', ')}]`,
+  })
+
+  try {
+    // Save current scope
+    const previousScope = { ...context }
+
+    // Increment function depth
+    incrementFunctionDepth(context)
+
+    // Push call stack frame
+    pushCallStackFrame(context, callFrame)
+
+    // Create new function scope
+    const functionScope = createFunctionScope(context, parameters)
+
+    // Replace context with function scope
+    Object.keys(context).forEach(key => {
+      if (!key.startsWith('__')) {
+        delete context[key]
+      }
+    })
+    Object.assign(context, functionScope)
+
+    pushStep(getNodeLine(functionDef.node), {
+      output: `Entering function '${functionName}'`,
+    })
+
+    // Execute function body
+    const result = executeStatements(functionDef.body.body, context, pushStep)
+
+    let returnValue: VariableValue = undefined
+
+    // Handle return value
+    if (result.type === 'return') {
+      returnValue = result.value as VariableValue
+      pushStep(getNodeLine(functionDef.node), {
+        output: `Function '${functionName}' returned: ${returnValue}`,
+      })
+    } else {
+      pushStep(getNodeLine(functionDef.node), {
+        output: `Function '${functionName}' completed (no return value)`,
+      })
+    }
+
+    // Update call frame with return value
+    callFrame.returnValue = returnValue
+
+    return returnValue
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    pushStep(getNodeLine(expr), {
+      output: `Error in function '${functionName}': ${errorMessage}`,
+    })
+    return undefined
+  } finally {
+    // Clean up: restore scope and call stack
+    popCallStackFrame(context)
+    decrementFunctionDepth(context)
+
+    // Restore previous scope
+    const previousScope = { ...context }
+    Object.keys(context).forEach(key => {
+      if (!key.startsWith('__')) {
+        delete context[key]
+      }
+    })
+
+    // Restore global variables but keep function-related context
+    Object.keys(previousScope).forEach(key => {
+      if (key.startsWith('__')) {
+        context[key] = previousScope[key]
+      } else {
+        // Only restore if it was a global variable (existed before function call)
+        if (key in previousScope) {
+          context[key] = previousScope[key]
+        }
+      }
+    })
+
+    pushStep(getNodeLine(expr), {
+      output: `Exiting function '${functionName}'`,
+    })
+  }
 }
 
 /**
@@ -377,6 +556,29 @@ export function evalExpr(
         finalValue = evalExpr(subExpr, context)
       }
       return finalValue
+    }
+
+    // Function calls
+    if (t.isCallExpression(expr)) {
+      // For function calls in expression context, we need special handling
+      if (t.isIdentifier(expr.callee)) {
+        const functionName = expr.callee.name
+        const enhancedContext = context as EnhancedExecutionContext
+        const functionDef = getFunction(enhancedContext, functionName)
+
+        if (functionDef) {
+          // This should be handled by executeFunctionCall, but we don't have pushStep here
+          // Return a placeholder for now
+          return `[Function Call: ${functionName}]`
+        }
+      }
+
+      // Handle console methods and other built-in calls
+      if (isConsoleMethod(expr)) {
+        return undefined // Console calls don't return values
+      }
+
+      return undefined
     }
 
     console.warn(`Unsupported expression type: ${expr.type}`)

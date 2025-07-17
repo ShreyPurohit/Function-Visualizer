@@ -1,5 +1,6 @@
-import { ExecutionContext, ExecutionMeta } from '@/types/execution'
-import { Node } from '@babel/types'
+import { ExecutionContext, ExecutionMeta } from '@/types/execution';
+import * as t from '@babel/types';
+import { Node } from '@babel/types';
 
 /**
  * Control flow result types for proper flow control
@@ -11,12 +12,42 @@ export type ControlFlowResult =
   | { type: 'return'; value?: unknown }
 
 /**
+ * Function definition storage
+ */
+export interface FunctionDefinition {
+  name: string
+  params: string[]
+  body: t.BlockStatement
+  node: t.FunctionDeclaration
+}
+
+/**
+ * Call stack frame for function execution tracking
+ */
+export interface CallStackFrame {
+  functionName: string
+  parameters: Record<string, unknown>
+  localVariables: ExecutionContext
+  returnValue?: unknown
+  line?: number
+}
+
+/**
  * Enhanced execution context with control flow state
  */
 export interface EnhancedExecutionContext extends ExecutionContext {
   __controlFlow?: ControlFlowResult
   __loopDepth?: number
   __functionDepth?: number
+}
+
+/**
+ * Function-related metadata stored separately from variables
+ */
+interface FunctionMetadata {
+  functions: Map<string, FunctionDefinition>
+  callStack: CallStackFrame[]
+  currentScope?: ExecutionContext
 }
 
 /**
@@ -66,6 +97,15 @@ export function shouldInterruptExecution(context: EnhancedExecutionContext): boo
  */
 export function resetControlFlow(context: EnhancedExecutionContext): void {
   context.__controlFlow = { type: 'normal' }
+
+  // Initialize function metadata if not present
+  if (!(context as any).__functionMetadata) {
+    (context as any).__functionMetadata = {
+      functions: new Map<string, FunctionDefinition>(),
+      callStack: [],
+      currentScope: context
+    } as FunctionMetadata
+  }
 }
 
 /**
@@ -101,6 +141,153 @@ export function decrementLoopDepth(context: EnhancedExecutionContext): void {
  */
 export function isInsideLoop(context: EnhancedExecutionContext): boolean {
   return getCurrentLoopDepth(context) > 0
+}
+
+/**
+ * Check if we're inside a function - NOW PROPERLY USED!
+ */
+export function isInsideFunction(context: EnhancedExecutionContext): boolean {
+  return (context.__functionDepth || 0) > 0
+}
+
+/**
+ * Increment function depth
+ */
+export function incrementFunctionDepth(context: EnhancedExecutionContext): void {
+  context.__functionDepth = (context.__functionDepth || 0) + 1
+}
+
+/**
+ * Decrement function depth
+ */
+export function decrementFunctionDepth(context: EnhancedExecutionContext): void {
+  context.__functionDepth = Math.max(0, (context.__functionDepth || 0) - 1)
+}
+
+/**
+ * Register a function definition
+ */
+export function registerFunction(
+  context: EnhancedExecutionContext,
+  functionDef: FunctionDefinition,
+): void {
+  const metadata = (context as any).__functionMetadata as FunctionMetadata
+  if (!metadata) {
+    resetControlFlow(context)
+  }
+  const finalMetadata = (context as any).__functionMetadata as FunctionMetadata
+  finalMetadata.functions.set(functionDef.name, functionDef)
+}
+
+/**
+ * Get a function definition by name
+ */
+export function getFunction(
+  context: EnhancedExecutionContext,
+  name: string,
+): FunctionDefinition | undefined {
+  const metadata = (context as any).__functionMetadata as FunctionMetadata
+  return metadata?.functions.get(name)
+}
+
+/**
+ * Push a new call stack frame
+ */
+export function pushCallStackFrame(
+  context: EnhancedExecutionContext,
+  frame: CallStackFrame,
+): void {
+  const metadata = (context as any).__functionMetadata as FunctionMetadata
+  if (!metadata) {
+    resetControlFlow(context)
+  }
+  const finalMetadata = (context as any).__functionMetadata as FunctionMetadata
+  finalMetadata.callStack.push(frame)
+}
+
+/**
+ * Pop the current call stack frame
+ */
+export function popCallStackFrame(context: EnhancedExecutionContext): CallStackFrame | undefined {
+  const metadata = (context as any).__functionMetadata as FunctionMetadata
+  return metadata?.callStack.pop()
+}
+
+/**
+ * Get current call stack depth
+ */
+export function getCallStackDepth(context: EnhancedExecutionContext): number {
+  const metadata = (context as any).__functionMetadata as FunctionMetadata
+  return metadata?.callStack.length || 0
+}
+
+/**
+ * Create a new scope for function execution
+ */
+export function createFunctionScope(
+  context: EnhancedExecutionContext,
+  parameters: Record<string, unknown>,
+): ExecutionContext {
+  // Create new scope with only parameters (properly typed)
+  const newScope: ExecutionContext = {}
+
+  // Add parameters with proper type conversion
+  Object.keys(parameters).forEach(key => {
+    const value = parameters[key]
+    // Convert unknown to VariableValue
+    if (value === null || value === undefined) {
+      newScope[key] = value
+    } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      newScope[key] = value
+    } else if (Array.isArray(value)) {
+      newScope[key] = value as unknown[]
+    } else if (typeof value === 'object') {
+      newScope[key] = value as Record<string, unknown>
+    } else {
+      // Fallback for other types
+      newScope[key] = String(value)
+    }
+  })
+
+  // Preserve control flow properties
+  if (context.__controlFlow) {
+    (newScope as EnhancedExecutionContext).__controlFlow = context.__controlFlow
+  }
+  if (context.__loopDepth !== undefined) {
+    (newScope as EnhancedExecutionContext).__loopDepth = context.__loopDepth
+  }
+  if (context.__functionDepth !== undefined) {
+    (newScope as EnhancedExecutionContext).__functionDepth = context.__functionDepth
+  }
+
+  // Copy function metadata reference
+  const metadata = (context as any).__functionMetadata
+  if (metadata) {
+    (newScope as any).__functionMetadata = metadata
+  }
+
+  return newScope
+}
+
+/**
+ * Restore previous scope after function execution
+ */
+export function restoreScope(
+  context: EnhancedExecutionContext,
+  previousScope: ExecutionContext,
+): void {
+  // Restore all properties from previous scope except function-related ones
+  Object.keys(context).forEach(key => {
+    if (!key.startsWith('__')) {
+      delete context[key]
+    }
+  })
+
+  Object.keys(previousScope).forEach(key => {
+    if (!key.startsWith('__')) {
+      context[key] = previousScope[key]
+    }
+  })
 }
 
 /**
